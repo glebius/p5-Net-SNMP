@@ -30,7 +30,8 @@ our @EXPORT_OK = qw( TRUE FALSE DEBUG_INFO );
 our %EXPORT_TAGS = (
    domains => [
       qw( DOMAIN_UDP DOMAIN_UDPIPV4 DOMAIN_UDPIPV6 DOMAIN_UDPIPV6Z
-          DOMAIN_TCPIPV4 DOMAIN_TCPIPV6 DOMAIN_TCPIPV6Z )
+          DOMAIN_TCPIPV4 DOMAIN_TCPIPV6 DOMAIN_TCPIPV6Z DOMAIN_UNIX_STREAM
+	  DOMAIN_UNIX_DGRAM )
    ],
    msgsize => [ qw( MSG_SIZE_DEFAULT MSG_SIZE_MINIMUM MSG_SIZE_MAXIMUM ) ],
    ports   => [ qw( SNMP_PORT SNMP_TRAP_PORT )                           ],
@@ -58,6 +59,8 @@ sub DOMAIN_UDPIPV6Z  { '1.3.6.1.2.1.100.1.4' }  # transportDomainUdpIpv6z
 sub DOMAIN_TCPIPV4   { '1.3.6.1.2.1.100.1.5' }  # transportDomainTcpIpv4
 sub DOMAIN_TCPIPV6   { '1.3.6.1.2.1.100.1.6' }  # transportDomainTcpIpv6
 sub DOMAIN_TCPIPV6Z  { '1.3.6.1.2.1.100.1.8' }  # transportDomainTcpIpv6z
+sub DOMAIN_UNIX_STREAM   { '1.3.6.1.2.1.100.1.13' } # transportDomainLocal
+sub DOMAIN_UNIX_DGRAM    { '1.3.6.1.2.1.100.1.17' } # missing in RFC 3419
 
 ## SNMP well-known ports
 
@@ -112,6 +115,10 @@ our $SOCKETS = {};                  # List of shared sockets
       'tcp/?(?:ip)?v?6',           DOMAIN_TCPIPV6,
       quotemeta DOMAIN_TCPIPV6,    DOMAIN_TCPIPV6,
       quotemeta DOMAIN_TCPIPV6Z,   DOMAIN_TCPIPV6,
+      '(local|unix)/stream',       DOMAIN_UNIX_STREAM,
+      quotemeta DOMAIN_UNIX_STREAM, DOMAIN_UNIX_STREAM,
+      '(local|unix)/dgram',        DOMAIN_UNIX_DGRAM,
+      quotemeta DOMAIN_UNIX_DGRAM, DOMAIN_UNIX_DGRAM,
    };
 
    sub new
@@ -181,6 +188,22 @@ our $SOCKETS = {};                  # List of shared sockets
          }
          return Net::SNMP::Transport::IPv4::TCP->new(%argv);
 
+      } elsif ($domain eq DOMAIN_UNIX_STREAM) {
+
+         if (defined ($error = load_module('Net::SNMP::Transport::UNIX::Stream')))
+         {
+            $error = 'Local UNIX support is unavailable ' . $error;
+            return wantarray ? (undef, $error) : undef;
+         }
+         return Net::SNMP::Transport::UNIX::Stream->new(%argv);
+      } elsif ($domain eq DOMAIN_UNIX_DGRAM) {
+
+         if (defined ($error = load_module('Net::SNMP::Transport::UNIX::Datagram')))
+         {
+            $error = 'Local UNIX support is unavailable ' . $error;
+            return wantarray ? (undef, $error) : undef;
+         }
+         return Net::SNMP::Transport::UNIX::Datagram->new(%argv);
       }
 
       # Load the default Transport Domain module without eval protection.
@@ -281,6 +304,11 @@ sub agent_addr
 }
 
 sub connectionless
+{
+   return TRUE;
+}
+
+sub needsbind
 {
    return TRUE;
 }
@@ -652,7 +680,8 @@ sub _new
 
       # Bind the socket.
 
-      if (!defined $this->{_socket}->bind($this->{_sock_name})) {
+      if ($this->needsbind &&
+          !defined $this->{_socket}->bind($this->{_sock_name})) {
          $this->_perror('Failed to bind %s socket', $this->type());
          return wantarray ? (undef, $this->{_error}) : undef
       }
